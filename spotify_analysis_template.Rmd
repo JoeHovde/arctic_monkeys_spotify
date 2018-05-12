@@ -1,0 +1,160 @@
+---
+title: "Spotify analysis"
+output:
+  html_document: default
+  html_notebook: default
+---
+
+```{r}
+library(spotifyr)
+library(tidyverse)
+```
+
+Set your keys to system environment variables
+```{r}
+Sys.setenv(SPOTIFY_CLIENT_ID = 'e22cc372a8c74c419517806f9e14c715')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '7bd8a8f3705741eb8581ddd4fe0cc70a')
+```
+What artist are you looking at?
+```{r}
+artist <- "Arctic Monkeys"
+```
+
+
+
+Get artist uri
+```{r}
+uris <- get_artists(artist_name = artist) %>% 
+  filter(artist_name == artist)  # filter because there's an "Arctic Monkeys tribute band" on Spotify that shows up in results
+
+uri <- uris$artist_uri[1]
+```
+
+Get songs
+
+```{r}
+songs <- get_album_tracks(get_albums(artist_uri = uri))
+```
+
+Get songs and attributes for the songs by joining the song dataframe to attribute dataframes on the track_uri
+
+```{r}
+songs <- songs %>% 
+  inner_join(get_track_popularity(songs)) %>% 
+  inner_join(get_track_audio_features(songs)) %>%
+  arrange(-track_popularity)
+
+# join to albums to get dates for album
+songs <- songs %>% 
+  inner_join(get_albums(uri))
+```
+#### Theme
+```{r}
+spotify_theme <- theme(legend.position = "none",
+                  panel.background = element_rect(fill = "white"),
+                  panel.grid.major = element_line(color = "white"),
+                  panel.grid.minor = element_line(color = "white"),
+                  panel.border = element_rect(color = "lightgrey", fill = NA))
+```
+
+
+#### Analysis
+
+Scatterplot matrix
+
+```{r}
+# only numeric variables for scatterplots
+num_var <- songs %>% 
+  select(track_popularity, danceability, energy, loudness, speechiness, acousticness, instrumentalness, liveness, valence, tempo, duration_ms)
+
+pairs(num_var)
+```
+
+Linear regression.
+
+```{r}
+model <- lm(track_popularity ~ danceability + tempo + speechiness + acousticness + valence + duration_ms, data = songs)
+
+summary(model)
+```
+
+#### Valence (measure of cheerfulness)
+
+```{r}
+pairs(num_var[, c("valence", "duration_ms", "track_popularity", "tempo")])
+```
+Danceability
+```{r}
+songs %>% 
+  select(track_name, track_popularity, danceability) %>% 
+  arrange(-danceability)
+```
+
+Valence vs popularity
+```{r}
+songs %>% 
+  ggplot(aes(valence, track_popularity)) +
+  geom_jitter(size = .5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_text(aes(label = track_name), size = 3, angle = 10) +
+  spotify_theme +
+  labs(x = "Song's Valence Score",
+       y = "Song's Popularity on Spotify",
+       title = "Valence vs. Popularity")
+```
+
+Danceability vs popularity
+```{r}
+songs %>% 
+  ggplot(aes(danceability, track_popularity)) +
+  geom_jitter(size = .5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_text(aes(label = track_name), size = 3, angle = 10) +
+  spotify_theme +
+  labs(x = "Song's Danceability Score",
+       y = "Song's Popularity on Spotify",
+       title = "Danceability vs. Popularity")
+```
+
+Plotting multiple histograms at once using https://www.r-bloggers.com/quick-plot-of-all-variables/
+
+Gather all variables and facet wrap by value
+
+```{r}
+songs %>% 
+  keep(is.numeric) %>% 
+  gather() %>% 
+  ggplot(aes(value)) +
+  facet_wrap(~key, scales = "free") +
+  geom_histogram()
+```
+
+Trying to decide which variables to cluster by. Perhaps Danceability, Energy, Tempo?
+```{r}
+pairs(num_var[, c("danceability", "energy", "tempo", "valence", "duration_ms", "acousticness")])
+```
+
+IDEA: Gif of movement across albums
+
+```{r}
+songs %>% 
+  ggplot(aes(tempo, valence, colour = album_name)) +
+  geom_point()
+```
+Mean tempo / valence per album
+```{r}
+songs %>% 
+  group_by(album_name) %>% 
+  summarise(average_tempo = mean(tempo), average_valence = mean(valence), average_energ = mean(energy), average_dance = mean(danceability)) %>% 
+  ggplot(aes(average_dance, average_valence, colour = album_name)) +
+  geom_point() +
+  spotify_theme +
+  theme(legend.position = "none") +
+  geom_text(aes(label = album_name),
+            position = position_nudge(.00, .002),
+            ) +
+  labs(x = "Average Danceability",
+       y = "Average Cheerfulness",
+       title = "Arctic Monkeys Albums' Danceability and Cheerfulness",
+       subtitle = "Using Spotify Data")
+```
